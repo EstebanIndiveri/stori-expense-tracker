@@ -1,0 +1,277 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'packages/backend/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/backend/**'
+      - 'go.mod'
+      - 'go.sum'
+
+env:
+  GO_VERSION: '1.21'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  # Detect changes and set up job matrix
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend-changed: ${{ steps.changes.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            backend:
+              - 'packages/backend/**'
+              - 'go.mod'
+              - 'go.sum'
+
+  # Backend testing and validation
+  test-backend:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend-changed == 'true'
+    runs-on: ubuntu-latest
+    
+    services:
+      dynamodb-local:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
+        options: >-
+          --health-cmd="curl -f http://localhost:8000/shell || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      
+      - name: Download dependencies
+        run: go mod download
+      
+      - name: Verify dependencies
+        run: go mod verify
+      
+      - name: Run go vet
+        run: go vet ./packages/backend/...
+      
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      
+      - name: Run staticcheck
+        run: staticcheck ./packages/backend/...
+      
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          working-directory: packages/backend
+          args: --timeout=5m
+      
+      - name: Setup test environment
+        run: |
+          # Create test tables in DynamoDB Local
+          cd packages/backend
+          go run tools/setup-test-db/main.go
+        env:
+          DYNAMODB_ENDPOINT: http://localhost:8000
+          DYNAMODB_TABLE_NAME: stori-transactions-test
+      
+      - name: Run unit tests
+        run: |
+          cd packages/backend
+          go test -v -race -coverprofile=coverage.out ./...
+        env:
+          DYNAMODB_ENDPOINT: http://localhost:8000
+          DYNAMODB_TABLE_NAME: stori-transactions-test
+          ENVIRONMENT: test
+      
+      - name: Run integration tests
+        run: |
+          cd packages/backend
+          go test -v -tags=integration ./tests/integration/...
+        env:
+          DYNAMODB_ENDPOINT: http://localhost:8000
+          DYNAMODB_TABLE_NAME: stori-transactions-test
+          ENVIRONMENT: test
+      
+      - name: Generate coverage report
+        run: |
+          cd packages/backend
+          go tool cover -html=coverage.out -o coverage.html
+          go tool cover -func=coverage.out
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: packages/backend/coverage.out
+          flags: backend
+          name: backend-coverage
+      
+      - name: Build binaries
+        run: |
+          cd packages/backend
+          # Build API Lambda
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/api cmd/api/main.go
+          # Build AI Advisor Lambda
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/ai-advisor cmd/ai-advisor/main.go
+      
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-binaries-${{ github.sha }}
+          path: packages/backend/bin/
+          retention-days: 30
+
+  # Security scanning
+  security-scan:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend-changed == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      
+      - name: Run Gosec Security Scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: './packages/backend/...'
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'packages/backend'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Deploy to staging
+  deploy-staging:
+    needs: [test-backend, security-scan]
+    if: |
+      always() && 
+      needs.test-backend.result == 'success' && 
+      needs.security-scan.result == 'success' && 
+      github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: backend-binaries-${{ github.sha }}
+          path: packages/backend/bin/
+      
+      - name: Deploy to staging
+        run: |
+          cd packages/backend
+          ./scripts/deploy.sh staging
+        env:
+          ENVIRONMENT: staging
+      
+      - name: Run smoke tests
+        run: |
+          cd packages/backend
+          go test -v -tags=smoke ./tests/smoke/...
+        env:
+          API_BASE_URL: ${{ vars.STAGING_API_URL }}
+          ENVIRONMENT: staging
+
+  # Deploy to production
+  deploy-production:
+    needs: [test-backend, security-scan]
+    if: |
+      always() && 
+      needs.test-backend.result == 'success' && 
+      needs.security-scan.result == 'success' && 
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: backend-binaries-${{ github.sha }}
+          path: packages/backend/bin/
+      
+      - name: Deploy to production
+        run: |
+          cd packages/backend
+          ./scripts/deploy.sh prod
+        env:
+          ENVIRONMENT: prod
+      
+      - name: Run production smoke tests
+        run: |
+          cd packages/backend
+          go test -v -tags=smoke ./tests/smoke/...
+        env:
+          API_BASE_URL: ${{ vars.PROD_API_URL }}
+          ENVIRONMENT: prod
+      
+      - name: Create GitHub release
+        if: github.ref == 'refs/heads/main'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: backend-v${{ github.run_number }}
+          release_name: Backend Release v${{ github.run_number }}
+          body: |
+            Backend deployment for commit ${{ github.sha }}
+            
+            Changes in this release:
+            ${{ github.event.head_commit.message }}
+          draft: false
+          prerelease: false

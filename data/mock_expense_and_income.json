@@ -1,0 +1,226 @@
+[
+  {
+    "date": "2024-01-01",
+    "amount": 2800,
+    "category": "salary",
+    "description": "Bi-weekly salary",
+    "type": "income"
+  },
+  {
+    "date": "2024-01-02",
+    "amount": -1200,
+    "category": "rent",
+    "description": "Monthly rent",
+    "type": "expense"
+  },
+  {
+    "date": "2024-01-03",
+    "amount": -85,
+    "category": "groceries",
+    "description": "Whole Foods",
+    "type": "expense"
+  },
+  {
+    "date": "2024-01-05",
+    "amount": -45,
+    "category": "utilities",
+    "description": "Electric bill",
+    "type": "expense"
+  },
+  {
+    "date": "2024-01-08",
+    "amount": -120,
+    "category": "groceries",
+    "description": "Safeway",
+    "type": "expense"
+  },
+  {
+    "date": "2024-01-10",
+    "amount": -60,
+    "category": "dining",
+    "description": "Restaurant dinner",
+    "type": "expense"
+  },
+  {
+    "date": "2024-01-12",
+    "amount": -35,
+    "category": "transportation",
+    "description": "Gas station",
+    "type": "expense"
+  },
+  {
+    "date": "2024-01-16",
+    "amount": 2800,
+    "category": "salary",
+    "description": "Bi-weekly salary",
+    "type": "income"
+  },
+  {
+    "date": "2024-01-18",
+    "amount": -95,
+    "category": "groceries",
+    "description": "Trader Joe's",
+    "type": "expense"
+  },
+  {
+    "date": "2024-01-20",
+    "amount": -25,
+    "category": "entertainment",
+    "description": "Movie tickets",
+    "type": "expense"
+  },
+  {
+    "date": "2024-01-22",
+    "amount": -180,
+    "category": "utilities",
+    "description": "Internet and cable",
+    "type": "expense"
+  },
+  {
+    "date": "2024-01-25",
+    "amount": -75,
+    "category": "dining",
+    "description": "Takeout order",
+    "type": "expense"
+  },
+  {
+    "date": "2024-02-01",
+    "amount": 2800,
+    "category": "salary",
+    "description": "Bi-weekly salary",
+    "type": "income"
+  },
+  {
+    "date": "2024-02-02",
+    "amount": -1200,
+    "category": "rent",
+    "description": "Monthly rent",
+    "type": "expense"
+  },
+  {
+    "date": "2024-02-05",
+    "amount": -90,
+    "category": "groceries",
+    "description": "Weekly groceries",
+    "type": "expense"
+  },
+  {
+    "date": "2024-02-07",
+    "amount": -50,
+    "category": "utilities",
+    "description": "Water bill",
+    "type": "expense"
+  },
+  {
+    "date": "2024-02-10",
+    "amount": -40,
+    "category": "transportation",
+    "description": "Public transport",
+    "type": "expense"
+  },
+  {
+    "date": "2024-02-14",
+    "amount": -150,
+    "category": "dining",
+    "description": "Valentine's dinner",
+    "type": "expense"
+  },
+  {
+    "date": "2024-02-16",
+    "amount": 2800,
+    "category": "salary",
+    "description": "Bi-weekly salary",
+    "type": "income"
+  },
+  {
+    "date": "2024-02-18",
+    "amount": -80,
+    "category": "groceries",
+    "description": "Costco shopping",
+    "type": "expense"
+  },
+  {
+    "date": "2024-02-20",
+    "amount": -30,
+    "category": "entertainment",
+    "description": "Streaming services",
+    "type": "expense"
+  },
+  {
+    "date": "2024-02-25",
+    "amount": -200,
+    "category": "healthcare",
+    "description": "Doctor visit",
+    "type": "expense"
+  },
+  {
+    "date": "2024-03-01",
+    "amount": 2800,
+    "category": "salary",
+    "description": "Bi-weekly salary",
+    "type": "income"
+  },
+  {
+    "date": "2024-03-02",
+    "amount": -1200,
+    "category": "rent",
+    "description": "Monthly rent",
+    "type": "expense"
+  },
+  {
+    "date": "2024-03-05",
+    "amount": -110,
+    "category": "groceries",
+    "description": "Monthly groceries",
+    "type": "expense"
+  },
+  {
+    "date": "2024-03-08",
+    "amount": -60,
+    "category": "utilities",
+    "description": "Electric bill",
+    "type": "expense"
+  },
+  {
+    "date": "2024-03-10",
+    "amount": -45,
+    "category": "transportation",
+    "description": "Gas fill-up",
+    "type": "expense"
+  },
+  {
+    "date": "2024-03-15",
+    "amount": -100,
+    "category": "shopping",
+    "description": "Clothing",
+    "type": "expense"
+  },
+  {
+    "date": "2024-03-16",
+    "amount": 2800,
+    "category": "salary",
+    "description": "Bi-weekly salary",
+    "type": "income"
+  },
+  {
+    "date": "2024-03-20",
+    "amount": -85,
+    "category": "dining",
+    "description": "Weekend brunch",
+    "type": "expense"
+  },
+  {
+    "date": "2024-03-22",
+    "amount": -35,
+    "category": "entertainment",
+    "description": "Concert tickets",
+    "type": "expense"
+  },
+  {
+    "date": "2024-03-25",
+    "amount": -120,
+    "category": "groceries",
+    "description": "Organic groceries",
+    "type": "expense"
+  }
+]

@@ -1,0 +1,315 @@
+name: Infrastructure CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infrastructure/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - prod
+      destroy:
+        description: 'Destroy infrastructure'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  TERRAFORM_VERSION: '1.6.0'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  # Terraform validation and planning
+  terraform-plan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [staging, prod]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Terraform Format Check
+        id: fmt
+        run: |
+          cd infrastructure
+          terraform fmt -check -recursive
+        continue-on-error: true
+      
+      - name: Terraform Init
+        id: init
+        run: |
+          cd infrastructure
+          terraform init \
+            -backend-config="bucket=${{ secrets.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}"
+      
+      - name: Terraform Validate
+        id: validate
+        run: |
+          cd infrastructure
+          terraform validate
+      
+      - name: Terraform Plan
+        id: plan
+        run: |
+          cd infrastructure
+          terraform plan \
+            -var="environment=${{ matrix.environment }}" \
+            -var="openai_api_key=${{ secrets.OPENAI_API_KEY }}" \
+            -out=${{ matrix.environment }}.tfplan
+        env:
+          TF_VAR_environment: ${{ matrix.environment }}
+      
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-plan-${{ matrix.environment }}-${{ github.sha }}
+          path: infrastructure/${{ matrix.environment }}.tfplan
+          retention-days: 30
+      
+      - name: Comment PR with Terraform Plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const output = `
+            ## Terraform Plan Results for ${{ matrix.environment }}
+            
+            #### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+            
+            <details><summary>Show Plan Output</summary>
+            
+            \`\`\`terraform
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+            
+            </details>
+            
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  # Security and compliance checks
+  terraform-security:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Checkov
+        id: checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: infrastructure
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+      
+      - name: Upload Checkov results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+      
+      - name: Run TFSec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infrastructure
+          format: sarif
+          sarif_file: tfsec-results.sarif
+      
+      - name: Upload TFSec results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: tfsec-results.sarif
+
+  # Deploy infrastructure to staging
+  deploy-staging:
+    needs: [terraform-plan, terraform-security]
+    if: |
+      github.ref == 'refs/heads/develop' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    runs-on: ubuntu-latest
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-plan-staging-${{ github.sha }}
+          path: infrastructure/
+      
+      - name: Terraform Init
+        run: |
+          cd infrastructure
+          terraform init \
+            -backend-config="bucket=${{ secrets.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="key=staging/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}"
+      
+      - name: Terraform Apply
+        if: github.event.inputs.destroy != 'true'
+        run: |
+          cd infrastructure
+          terraform apply staging.tfplan
+      
+      - name: Terraform Destroy
+        if: github.event.inputs.destroy == 'true'
+        run: |
+          cd infrastructure
+          terraform destroy -auto-approve \
+            -var="environment=staging" \
+            -var="openai_api_key=${{ secrets.OPENAI_API_KEY }}"
+      
+      - name: Output infrastructure details
+        if: github.event.inputs.destroy != 'true'
+        run: |
+          cd infrastructure
+          terraform output -json > staging-outputs.json
+          cat staging-outputs.json
+      
+      - name: Upload infrastructure outputs
+        if: github.event.inputs.destroy != 'true'
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-outputs-staging
+          path: infrastructure/staging-outputs.json
+
+  # Deploy infrastructure to production
+  deploy-production:
+    needs: [terraform-plan, terraform-security]
+    if: |
+      github.ref == 'refs/heads/main' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod')
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-plan-prod-${{ github.sha }}
+          path: infrastructure/
+      
+      - name: Terraform Init
+        run: |
+          cd infrastructure
+          terraform init \
+            -backend-config="bucket=${{ secrets.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="key=prod/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}"
+      
+      - name: Terraform Apply
+        if: github.event.inputs.destroy != 'true'
+        run: |
+          cd infrastructure
+          terraform apply prod.tfplan
+      
+      - name: Terraform Destroy
+        if: github.event.inputs.destroy == 'true'
+        run: |
+          cd infrastructure
+          terraform destroy -auto-approve \
+            -var="environment=prod" \
+            -var="openai_api_key=${{ secrets.OPENAI_API_KEY }}"
+      
+      - name: Output infrastructure details
+        if: github.event.inputs.destroy != 'true'
+        run: |
+          cd infrastructure
+          terraform output -json > prod-outputs.json
+          cat prod-outputs.json
+      
+      - name: Upload infrastructure outputs
+        if: github.event.inputs.destroy != 'true'
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-outputs-prod
+          path: infrastructure/prod-outputs.json
+      
+      - name: Create infrastructure release
+        if: github.ref == 'refs/heads/main' && github.event.inputs.destroy != 'true'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: infrastructure-v${{ github.run_number }}
+          release_name: Infrastructure Release v${{ github.run_number }}
+          body: |
+            Infrastructure deployment for commit ${{ github.sha }}
+            
+            Environment: Production
+            Terraform Version: ${{ env.TERRAFORM_VERSION }}
+          draft: false
+          prerelease: false

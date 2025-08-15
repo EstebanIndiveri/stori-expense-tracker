@@ -1,0 +1,1119 @@
+openapi: 3.0.3
+info:
+  title: Stori Expense Tracker API
+  description: |
+    API REST para el sistema de seguimiento de gastos de Stori.
+    
+    Esta API permite gestionar transacciones financieras, obtener análisis de gastos
+    y recibir consejos financieros basados en IA.
+    
+    ## Características principales:
+    - ✅ Gestión completa de transacciones (CRUD)
+    - 📊 Analytics y reportes financieros
+    - 🤖 Consejos financieros con IA
+    - 🔍 Filtros y búsquedas avanzadas
+    - 📈 Tendencias mensuales y categorización
+    
+  version: 1.0.0
+  contact:
+    name: Stori Development Team
+    email: dev@stori.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Servidor de desarrollo local
+  - url: https://api.stori.com
+    description: Servidor de producción
+
+paths:
+  /api/v1/health:
+    get:
+      summary: Health Check
+      description: Endpoint para verificar el estado del servidor
+      tags:
+        - Sistema
+      responses:
+        '200':
+          description: Servidor funcionando correctamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2025-08-13T20:22:13Z"
+
+  /api/v1/transactions:
+    get:
+      summary: Obtener todas las transacciones
+      description: Obtiene una lista de todas las transacciones del usuario
+      tags:
+        - Transacciones
+      parameters:
+        - name: limit
+          in: query
+          description: Número máximo de transacciones a retornar
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          description: Número de transacciones a omitir para paginación
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: category
+          in: query
+          description: Filtrar por categoría
+          required: false
+          schema:
+            type: string
+            enum: [food, transport, entertainment, shopping, health, education, other]
+        - name: type
+          in: query
+          description: Filtrar por tipo de transacción
+          required: false
+          schema:
+            type: string
+            enum: [income, expense]
+        - name: start_date
+          in: query
+          description: Fecha de inicio para filtrar (YYYY-MM-DD)
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          description: Fecha de fin para filtrar (YYYY-MM-DD)
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Lista de transacciones obtenida exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationInfo'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Crear nueva transacción
+      description: Crea una nueva transacción financiera
+      tags:
+        - Transacciones
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransactionRequest'
+            examples:
+              expense_example:
+                summary: Ejemplo de gasto
+                value:
+                  amount: -25.50
+                  description: "Almuerzo en restaurante"
+                  category: "food"
+                  type: "expense"
+                  date: "2025-08-12T14:30:00Z"
+              income_example:
+                summary: Ejemplo de ingreso
+                value:
+                  amount: 2500.00
+                  description: "Salario mensual"
+                  category: "salary"
+                  type: "income"
+                  date: "2025-08-01T09:00:00Z"
+      responses:
+        '201':
+          description: Transacción creada exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '400':
+          description: Datos de entrada inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/transactions/{id}:
+    get:
+      summary: Obtener transacción por ID
+      description: Obtiene los detalles de una transacción específica
+      tags:
+        - Transacciones
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID único de la transacción
+          schema:
+            type: string
+            format: uuid
+        - name: user_id
+          in: query
+          required: true
+          description: ID del usuario
+          schema:
+            type: string
+            example: "user-123"
+      responses:
+        '200':
+          description: Transacción encontrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '404':
+          description: Transacción no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      summary: Actualizar transacción
+      description: Actualiza una transacción existente
+      tags:
+        - Transacciones
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID único de la transacción
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTransactionRequest'
+      responses:
+        '200':
+          description: Transacción actualizada exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '400':
+          description: Datos de entrada inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Transacción no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Eliminar transacción
+      description: Elimina una transacción específica
+      tags:
+        - Transacciones
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID único de la transacción
+          schema:
+            type: string
+            format: uuid
+        - name: user_id
+          in: query
+          required: true
+          description: ID del usuario
+          schema:
+            type: string
+            example: "user-123"
+      responses:
+        '200':
+          description: Transacción eliminada exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Transaction deleted successfully"
+        '404':
+          description: Transacción no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/transactions/month/{month}:
+    get:
+      summary: Obtener transacciones por mes
+      description: Obtiene todas las transacciones de un mes específico
+      tags:
+        - Transacciones
+      parameters:
+        - name: month
+          in: path
+          required: true
+          description: Mes en formato YYYY-MM
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+            example: "2025-08"
+        - name: user_id
+          in: query
+          description: ID del usuario
+          required: false
+          schema:
+            type: string
+            example: "123"
+      responses:
+        '200':
+          description: Transacciones del mes obtenidas exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+        '400':
+          description: Formato de mes inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/transactions/category/{category}:
+    get:
+      summary: Obtener transacciones por categoría
+      description: Obtiene todas las transacciones de una categoría específica
+      tags:
+        - Transacciones
+      parameters:
+        - name: category
+          in: path
+          required: true
+          description: Categoría de la transacción
+          schema:
+            type: string
+            enum: [food, transport, entertainment, shopping, health, education, salary, other]
+            example: "food"
+        - name: user_id
+          in: query
+          description: ID del usuario
+          required: false
+          schema:
+            type: string
+            example: "123"
+      responses:
+        '200':
+          description: Transacciones de la categoría obtenidas exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+        '400':
+          description: Categoría inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/analytics/summary:
+    get:
+      summary: Resumen financiero
+      description: Obtiene un resumen general de las finanzas del usuario
+      tags:
+        - Analytics
+      parameters:
+        - name: period
+          in: query
+          description: Período para el resumen
+          required: false
+          schema:
+            type: string
+            enum: [week, month, quarter, year]
+            default: month
+        - name: start_date
+          in: query
+          description: Fecha de inicio personalizada (YYYY-MM-DD)
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          description: Fecha de fin personalizada (YYYY-MM-DD)
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Resumen financiero obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/FinancialSummary'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/analytics/monthly/{month}:
+    get:
+      summary: Analytics mensuales
+      description: Obtiene análisis detallado de un mes específico
+      tags:
+        - Analytics
+      parameters:
+        - name: month
+          in: path
+          required: true
+          description: Mes en formato YYYY-MM
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+            example: "2025-08"
+        - name: user_id
+          in: query
+          description: ID del usuario
+          required: false
+          schema:
+            type: string
+            example: "123"
+      responses:
+        '200':
+          description: Analytics mensuales obtenidos exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/MonthlyTrend'
+        '400':
+          description: Formato de mes inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/analytics/categories:
+    get:
+      summary: Desglose por categorías
+      description: Obtiene un desglose de gastos agrupados por categoría
+      tags:
+        - Analytics
+      parameters:
+        - name: user_id
+          in: query
+          description: ID del usuario
+          required: false
+          schema:
+            type: string
+            example: "123"
+        - name: period
+          in: query
+          description: Período para el análisis
+          required: false
+          schema:
+            type: string
+            enum: [week, month, quarter, year]
+            default: month
+      responses:
+        '200':
+          description: Desglose por categorías obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SpendingByCategory'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/analytics/monthly-trends:
+    get:
+      summary: Tendencias mensuales
+      description: Obtiene las tendencias de ingresos y gastos por mes
+      tags:
+        - Analytics
+      parameters:
+        - name: months
+          in: query
+          description: Número de meses hacia atrás a incluir
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 24
+            default: 12
+      responses:
+        '200':
+          description: Tendencias mensuales obtenidas exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MonthlyTrend'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/ai/advice:
+    post:
+      summary: Obtener consejo financiero con IA
+      description: Obtiene consejos financieros personalizados basados en IA
+      tags:
+        - Inteligencia Artificial
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIAdviceRequest'
+            examples:
+              general_advice:
+                summary: Consejo general
+                value:
+                  query: "¿Cómo puedo ahorrar más dinero este mes?"
+                  context:
+                    monthly_income: 3000.00
+                    monthly_expenses: 2500.00
+                    savings_goal: 500.00
+              spending_analysis:
+                summary: Análisis de gastos
+                value:
+                  query: "Analiza mis gastos en entretenimiento"
+                  context:
+                    monthly_income: 3000.00
+                    monthly_expenses: 2500.00
+                    entertainment_spending: 300.00
+      responses:
+        '200':
+          description: Consejo financiero generado exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/AIAdviceResponse'
+        '400':
+          description: Solicitud inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/ai/advisor:
+    get:
+      summary: Obtener consejo financiero automático
+      description: Obtiene consejos financieros personalizados automáticamente basados en el perfil del usuario
+      tags:
+        - Inteligencia Artificial
+      parameters:
+        - name: user_id
+          in: query
+          description: ID del usuario para personalizar el consejo
+          required: false
+          schema:
+            type: string
+            example: "123"
+      responses:
+        '200':
+          description: Consejo financiero automático generado exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  advice:
+                    type: string
+                    description: Consejo financiero principal
+                    example: "¡hola! Como asesor financiero de Stori, me alegra poder ayudarte..."
+                  suggestions:
+                    type: array
+                    items:
+                      type: string
+                    description: Lista de sugerencias específicas
+                    example:
+                      - "Establece un presupuesto mensual"
+                      - "Ahorra algo cada mes"
+                      - "Reduce gastos innecesarios"
+                  context:
+                    type: object
+                    description: Contexto financiero del usuario
+                    properties:
+                      monthly_income:
+                        type: number
+                        format: float
+                        example: 0
+                      monthly_expense:
+                        type: number
+                        format: float
+                        example: 0
+                      savings_rate:
+                        type: number
+                        format: float
+                        example: 0
+                      top_categories:
+                        type: array
+                        items:
+                          type: string
+                        nullable: true
+                        example: null
+                      spending_trends:
+                        type: array
+                        items:
+                          type: string
+                        example: ["You spent $-0.00 more than you earned this month"]
+                  timestamp:
+                    type: string
+                    format: date-time
+                    description: Timestamp de la respuesta
+                    example: "2025-08-13T20:22:13.124533Z"
+                  provider:
+                    type: string
+                    description: Proveedor de IA utilizado
+                    example: "groq"
+                  model:
+                    type: string
+                    description: Modelo de IA utilizado
+                    example: "llama3-8b-8192"
+        '500':
+          description: Error interno del servidor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: ID único de la transacción
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          description: ID del usuario
+          example: "user123"
+        amount:
+          type: number
+          format: float
+          description: Monto de la transacción (negativo para gastos, positivo para ingresos)
+          example: -25.50
+        description:
+          type: string
+          description: Descripción de la transacción
+          example: "Almuerzo en restaurante"
+        category:
+          type: string
+          description: Categoría de la transacción
+          enum: [food, transport, entertainment, shopping, health, education, salary, other]
+          example: "food"
+        type:
+          type: string
+          description: Tipo de transacción
+          enum: [income, expense]
+          example: "expense"
+        date:
+          type: string
+          format: date-time
+          description: Fecha y hora de la transacción
+          example: "2025-08-12T14:30:00Z"
+        created_at:
+          type: string
+          format: date-time
+          description: Fecha de creación del registro
+          example: "2025-08-12T14:30:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          description: Fecha de última actualización
+          example: "2025-08-12T14:30:00Z"
+
+    CreateTransactionRequest:
+      type: object
+      required:
+        - amount
+        - description
+        - category
+        - type
+        - date
+      properties:
+        amount:
+          type: number
+          format: float
+          description: Monto de la transacción
+          example: -25.50
+        description:
+          type: string
+          description: Descripción de la transacción
+          minLength: 1
+          maxLength: 255
+          example: "Almuerzo en restaurante"
+        category:
+          type: string
+          description: Categoría de la transacción
+          enum: [food, transport, entertainment, shopping, health, education, salary, other]
+          example: "food"
+        type:
+          type: string
+          description: Tipo de transacción
+          enum: [income, expense]
+          example: "expense"
+        date:
+          type: string
+          format: date-time
+          description: Fecha y hora de la transacción
+          example: "2025-08-12T14:30:00Z"
+
+    UpdateTransactionRequest:
+      type: object
+      properties:
+        amount:
+          type: number
+          format: float
+          description: Monto de la transacción
+          example: -30.00
+        description:
+          type: string
+          description: Descripción de la transacción
+          minLength: 1
+          maxLength: 255
+          example: "Cena en restaurante"
+        category:
+          type: string
+          description: Categoría de la transacción
+          enum: [food, transport, entertainment, shopping, health, education, salary, other]
+          example: "food"
+        type:
+          type: string
+          description: Tipo de transacción
+          enum: [income, expense]
+          example: "expense"
+        date:
+          type: string
+          format: date-time
+          description: Fecha y hora de la transacción
+          example: "2025-08-12T19:30:00Z"
+
+    FinancialSummary:
+      type: object
+      properties:
+        period:
+          type: string
+          description: Período del resumen
+          example: "month"
+        start_date:
+          type: string
+          format: date
+          description: Fecha de inicio del período
+          example: "2025-08-01"
+        end_date:
+          type: string
+          format: date
+          description: Fecha de fin del período
+          example: "2025-08-31"
+        total_income:
+          type: number
+          format: float
+          description: Total de ingresos
+          example: 3000.00
+        total_expenses:
+          type: number
+          format: float
+          description: Total de gastos
+          example: 2500.00
+        net_balance:
+          type: number
+          format: float
+          description: Balance neto (ingresos - gastos)
+          example: 500.00
+        transaction_count:
+          type: integer
+          description: Número total de transacciones
+          example: 45
+        average_transaction:
+          type: number
+          format: float
+          description: Monto promedio por transacción
+          example: 122.22
+        largest_expense:
+          $ref: '#/components/schemas/Transaction'
+        largest_income:
+          $ref: '#/components/schemas/Transaction'
+
+    SpendingByCategory:
+      type: object
+      properties:
+        category:
+          type: string
+          description: Nombre de la categoría
+          example: "food"
+        total_amount:
+          type: number
+          format: float
+          description: Monto total gastado en la categoría
+          example: 450.00
+        transaction_count:
+          type: integer
+          description: Número de transacciones en la categoría
+          example: 18
+        percentage:
+          type: number
+          format: float
+          description: Porcentaje del total de gastos
+          example: 18.0
+        average_amount:
+          type: number
+          format: float
+          description: Monto promedio por transacción en la categoría
+          example: 25.00
+
+    MonthlyTrend:
+      type: object
+      properties:
+        month:
+          type: string
+          description: Mes en formato YYYY-MM
+          example: "2025-08"
+        total_income:
+          type: number
+          format: float
+          description: Total de ingresos del mes
+          example: 3000.00
+        total_expenses:
+          type: number
+          format: float
+          description: Total de gastos del mes
+          example: 2500.00
+        net_balance:
+          type: number
+          format: float
+          description: Balance neto del mes
+          example: 500.00
+        transaction_count:
+          type: integer
+          description: Número de transacciones del mes
+          example: 45
+
+    AIAdviceRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: Pregunta o consulta financiera
+          minLength: 10
+          maxLength: 500
+          example: "¿Cómo puedo reducir mis gastos en entretenimiento?"
+        context:
+          type: object
+          description: Contexto financiero adicional
+          properties:
+            monthly_income:
+              type: number
+              format: float
+              description: Ingresos mensuales
+              example: 3000.00
+            monthly_expenses:
+              type: number
+              format: float
+              description: Gastos mensuales
+              example: 2500.00
+            savings_goal:
+              type: number
+              format: float
+              description: Meta de ahorro
+              example: 500.00
+            debt_amount:
+              type: number
+              format: float
+              description: Monto de deudas
+              example: 1000.00
+            financial_goals:
+              type: array
+              items:
+                type: string
+              description: Objetivos financieros
+              example: ["Ahorrar para vacaciones", "Pagar deudas"]
+
+    AIAdviceResponse:
+      type: object
+      properties:
+        advice:
+          type: string
+          description: Consejo financiero generado por IA
+          example: "Para reducir tus gastos en entretenimiento, te recomiendo establecer un presupuesto mensual específico y buscar alternativas gratuitas como eventos al aire libre."
+        suggestions:
+          type: array
+          items:
+            type: string
+          description: Lista de sugerencias específicas
+          example:
+            - "Establece un presupuesto de $200 mensuales para entretenimiento"
+            - "Busca eventos gratuitos en tu ciudad"
+            - "Considera servicios de streaming compartidos"
+        context:
+          type: object
+          description: Contexto financiero del usuario usado para generar el consejo
+          properties:
+            monthly_income:
+              type: number
+              format: float
+              description: Ingresos mensuales
+              example: 0
+            monthly_expense:
+              type: number
+              format: float
+              description: Gastos mensuales
+              example: 0
+            savings_rate:
+              type: number
+              format: float
+              description: Tasa de ahorro
+              example: 0
+            top_categories:
+              type: array
+              items:
+                type: string
+              nullable: true
+              description: Categorías principales de gasto
+              example: null
+            spending_trends:
+              type: array
+              items:
+                type: string
+              description: Tendencias de gasto
+              example: ["You spent $-0.00 more than you earned this month"]
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp de cuando se generó el consejo
+          example: "2025-08-13T20:22:13.124533Z"
+        provider:
+          type: string
+          description: Proveedor de IA utilizado (groq, openai)
+          example: "groq"
+        model:
+          type: string
+          description: Modelo de IA específico utilizado
+          example: "llama3-8b-8192"
+
+    PaginationInfo:
+      type: object
+      properties:
+        limit:
+          type: integer
+          description: Número de elementos por página
+          example: 50
+        offset:
+          type: integer
+          description: Número de elementos omitidos
+          example: 0
+        total:
+          type: integer
+          description: Número total de elementos
+          example: 150
+        has_more:
+          type: boolean
+          description: Indica si hay más elementos disponibles
+          example: true
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Código de error interno
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              description: Mensaje de error principal
+              example: "Validation failed"
+            details:
+              type: string
+              description: Detalles adicionales del error
+              example: "Amount is required and must be a valid number"
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp del error
+          example: "2025-08-12T14:30:00Z"
+
+tags:
+  - name: Sistema
+    description: Endpoints de sistema y salud
+  - name: Transacciones
+    description: Gestión de transacciones financieras
+  - name: Analytics
+    description: Análisis y reportes financieros
+  - name: Inteligencia Artificial
+    description: Consejos financieros con IA
