@@ -45,7 +45,7 @@ func (suite *SmokeTestSuite) TearDownSuite() {
 }
 
 func (suite *SmokeTestSuite) TestHealthEndpoint() {
-	resp, err := suite.client.Get(suite.baseURL + "/health")
+	resp, err := suite.client.Get(suite.baseURL + "/api/v1/health")
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), http.StatusOK, resp.StatusCode)
 

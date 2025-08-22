@@ -45,7 +45,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Environment:       getEnv("ENVIRONMENT", "dev"),
 		Region:           getEnv("AWS_REGION", "us-east-1"),
-		DynamoDBTableName: getEnv("DYNAMODB_TABLE_NAME", "stori-transactions-dev"),
+		DynamoDBTableName: getEnv("DYNAMODB_TABLE_NAME", "stori-transactions-prod"),
 		DynamoDBEndpoint:  getEnv("DYNAMODB_ENDPOINT", ""),
 		AIProvider:        getEnv("AI_PROVIDER", "groq"),
 		OpenAIAPIKeySSM:   getEnv("OPENAI_API_KEY_SSM", "/stori/dev/openai-api-key"),
@@ -54,6 +54,9 @@ func Load() (*Config, error) {
 			getEnv("FRONTEND_URL", "http://localhost:3000"),
 		},
 	}
+	
+	// Debug: log the actual table name being used
+	fmt.Printf("DEBUG: DynamoDBTableName set to: %s\n", cfg.DynamoDBTableName)
 	
 	// Set AI configuration based on provider
 	if cfg.AIProvider == "groq" {
@@ -137,4 +140,9 @@ func loadEnvFiles() error {
 	}
 	
 	return nil
+}
+
+// GetDynamoDBTableName returns the DynamoDB table name
+func GetDynamoDBTableName() string {
+	return getEnv("DYNAMODB_TABLE_NAME", "stori-transactions-prod")
 }
