@@ -73,6 +73,7 @@ Thumbs.db
 
 # AWS
 .aws/
+app-runner-config.json
 
 # Local development
 tmp/

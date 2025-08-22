@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -24,26 +25,38 @@ type RawTransaction struct {
 	Type        string  `json:"type"`
 }
 
+// Transaction represents a financial transaction compatible with backend model
 type Transaction struct {
-	PK          string    `dynamodbav:"pk"`
-	SK          string    `dynamodbav:"sk"`
-	TxID        string    `dynamodbav:"txId"`
-	Date        string    `dynamodbav:"date"`
-	YearMonth   string    `dynamodbav:"yyyymm"`
-	Amount      float64   `dynamodbav:"amount"`
-	Category    string    `dynamodbav:"category"`
-	Type        string    `dynamodbav:"type"`
-	Description string    `dynamodbav:"description"`
-	GSI1PK      string    `dynamodbav:"gsi1pk"`
-	GSI1SK      string    `dynamodbav:"gsi1sk"`
-	GSI2PK      string    `dynamodbav:"gsi2pk"`
-	GSI2SK      string    `dynamodbav:"gsi2sk"`
-	CreatedAt   time.Time `dynamodbav:"createdAt"`
-	UpdatedAt   time.Time `dynamodbav:"updatedAt"`
+	ID          string    `json:"id" dynamodbav:"id"`
+	UserID      string    `json:"user_id" dynamodbav:"user_id"`
+	Date        time.Time `json:"date" dynamodbav:"date"`
+	Amount      float64   `json:"amount" dynamodbav:"amount"`
+	Description string    `json:"description" dynamodbav:"description"`
+	Category    string    `json:"category" dynamodbav:"category"`
+	Type        string    `json:"type" dynamodbav:"type"`
+	
+	// DynamoDB keys - compatible with backend patterns
+	PK     string `json:"-" dynamodbav:"PK"`     // USER#{userID}
+	SK     string `json:"-" dynamodbav:"SK"`     // TX#{date}#{id}
+	GSI1PK string `json:"-" dynamodbav:"GSI1PK"` // MONTH#{YYYY-MM}#{userID}
+	GSI1SK string `json:"-" dynamodbav:"GSI1SK"` // TX#{date}#{id}
+	GSI2PK string `json:"-" dynamodbav:"GSI2PK"` // CATEGORY#{category}#{userID}
+	GSI2SK string `json:"-" dynamodbav:"GSI2SK"` // TX#{date}#{id}
+	
+	// Metadata
+	CreatedAt time.Time `json:"created_at" dynamodbav:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" dynamodbav:"updated_at"`
 }
 
 func main() {
 	ctx := context.Background()
+
+	// Get UserID from environment or use default
+	userID := os.Getenv("USER_ID")
+	if userID == "" {
+		userID = "demo-user-123"
+		fmt.Printf("Using default UserID: %s (set USER_ID env var to override)\n", userID)
+	}
 
 	// Load AWS config
 	cfg, err := config.LoadDefaultConfig(ctx)
@@ -80,7 +93,7 @@ func main() {
 	}
 
 	// Transform and batch write
-	fmt.Printf("Processing %d transactions...\n", len(rawTransactions))
+	fmt.Printf("Processing %d transactions for user %s...\n", len(rawTransactions), userID)
 
 	for i := 0; i < len(rawTransactions); i += 25 {
 		end := i + 25
@@ -89,7 +102,7 @@ func main() {
 		}
 
 		batch := rawTransactions[i:end]
-		if err := writeBatch(ctx, client, tableName, batch); err != nil {
+		if err := writeBatch(ctx, client, tableName, batch, userID); err != nil {
 			log.Fatalf("Failed to write batch: %v", err)
 		}
 
@@ -100,11 +113,11 @@ func main() {
 	fmt.Println("Data import completed successfully!")
 }
 
-func writeBatch(ctx context.Context, client *dynamodb.Client, tableName string, rawTransactions []RawTransaction) error {
+func writeBatch(ctx context.Context, client *dynamodb.Client, tableName string, rawTransactions []RawTransaction, userID string) error {
 	var writeRequests []types.WriteRequest
 
 	for _, raw := range rawTransactions {
-		transaction := transformTransaction(raw)
+		transaction := transformTransaction(raw, userID)
 
 		item, err := attributevalue.MarshalMap(transaction)
 		if err != nil {
@@ -147,35 +160,39 @@ func writeBatch(ctx context.Context, client *dynamodb.Client, tableName string, 
 	return nil
 }
 
-func transformTransaction(raw RawTransaction) Transaction {
+func transformTransaction(raw RawTransaction, userID string) Transaction {
 	txID := uuid.New().String()
-	date := raw.Date
-	yearMonth := date[:7] // "2024-01"
+	
+	// Parse date string to time.Time
+	parsedDate, err := time.Parse("2006-01-02", raw.Date)
+	if err != nil {
+		// If parsing fails, use current time
+		log.Printf("Warning: Failed to parse date %s, using current time", raw.Date)
+		parsedDate = time.Now().UTC()
+	}
 
 	now := time.Now().UTC()
+	yearMonth := parsedDate.Format("2006-01")
 
-	return Transaction{
-		// Primary key
-		PK: fmt.Sprintf("DS#v1#M#%s", yearMonth),
-		SK: fmt.Sprintf("D#%s#TX#%s", date, txID),
-
-		// Core attributes
-		TxID:        txID,
-		Date:        date,
-		YearMonth:   yearMonth,
+	transaction := Transaction{
+		ID:          txID,
+		UserID:      userID,
+		Date:        parsedDate,
 		Amount:      raw.Amount,
 		Category:    raw.Category,
 		Type:        raw.Type,
 		Description: raw.Description,
-
-		// GSI keys
-		GSI1PK: fmt.Sprintf("CAT#%s#M#%s", raw.Category, yearMonth),
-		GSI1SK: fmt.Sprintf("D#%s#TX#%s", date, txID),
-		GSI2PK: fmt.Sprintf("T#%s#M#%s", raw.Type, yearMonth),
-		GSI2SK: fmt.Sprintf("D#%s#TX#%s", date, txID),
-
-		// Metadata
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
+
+	// Generate DynamoDB keys using backend patterns
+	transaction.PK = fmt.Sprintf("USER#%s", userID)
+	transaction.SK = fmt.Sprintf("TX#%s#%s", raw.Date, txID)
+	transaction.GSI1PK = fmt.Sprintf("MONTH#%s#%s", yearMonth, userID)
+	transaction.GSI1SK = fmt.Sprintf("TX#%s#%s", raw.Date, txID)
+	transaction.GSI2PK = fmt.Sprintf("CATEGORY#%s#%s", strings.ToUpper(raw.Category), userID)
+	transaction.GSI2SK = fmt.Sprintf("TX#%s#%s", raw.Date, txID)
+
+	return transaction
 }

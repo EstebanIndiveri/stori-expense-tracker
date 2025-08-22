@@ -19,14 +19,86 @@ import (
 )
 
 func main() {
+	// Check for health check flag
+	if len(os.Args) > 1 && os.Args[1] == "--health-check" {
+		healthCheck()
+		return
+	}
+
+	startServer()
+}
+
+func healthCheck() {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("http://localhost:8080/api/v1/health")
+	if err != nil {
+		log.Printf("Health check failed: %v", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Health check failed: status %d", resp.StatusCode)
+		os.Exit(1)
+	}
+	
+	os.Exit(0)
+}
+
+func startServer() {
 	log.Println("Starting Stori Expense Tracker API Server...")
 
+	// Start basic server first for health checks
+	router := mux.NewRouter()
+	
+	// Add immediate health check that doesn't depend on DB
+	router.PathPrefix("/api/v1").Subrouter().HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"healthy","timestamp":"`, time.Now().Format(time.RFC3339), `"}`)
+	}).Methods("GET")
+
+	// Configure CORS immediately
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"*"},
+		ExposedHeaders:   []string{"*"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	})
+
+	handler := c.Handler(router)
+
+	// Server configuration
+	port := getEnvOrDefault("PORT", "8080")
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      handler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	log.Printf("Server starting on port %s", port)
+	
+	// Initialize services in the background
+	go initializeServices(router)
+
+	// Start server (this blocks)
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
+}
+
+func initializeServices(router *mux.Router) {
 	ctx := context.Background()
 
 	// Initialize DynamoDB client
 	dbClient, err := database.NewDynamoDBClient(ctx)
 	if err != nil {
-		log.Fatalf("Failed to create DynamoDB client: %v", err)
+		log.Printf("Warning: Failed to create DynamoDB client: %v", err)
+		return
 	}
 
 	// Create tables if not exist
@@ -34,10 +106,11 @@ func main() {
 		log.Printf("Warning: Failed to create tables: %v", err)
 	}
 
-	// Initialize repository
+	// Initialize repository - use the full table name from config
+	tableName := config.GetDynamoDBTableName()
 	transactionRepo := repository.NewDynamoDBRepository(
-		dbClient.Client, 
-		dbClient.Config.TablePrefix+"-transactions",
+		dbClient.Client,
+		tableName,
 	)
 
 	// Initialize services
@@ -67,48 +140,21 @@ func main() {
 	analyticsHandler := handlers.NewAnalyticsHandler(analyticsService)
 	aiHandler := handlers.NewAIHandler(aiService)
 
-	// Setup routes
-	router := setupRoutes(transactionHandler, budgetHandler, analyticsHandler, aiHandler)
+	// Setup full routes
+	setupFullRoutes(router, transactionHandler, budgetHandler, analyticsHandler, aiHandler)
 
-	// Configure CORS
-	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"*"},
-		ExposedHeaders:   []string{"*"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	})
-
-	handler := c.Handler(router)
-
-	// Server configuration
-	port := getEnvOrDefault("PORT", "8080")
-	server := &http.Server{
-		Addr:         ":" + port,
-		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	log.Printf("Server starting on port %s", port)
+	log.Printf("Services initialized successfully")
 	log.Printf("Environment: %s", dbClient.Config.Environment)
-	log.Printf("DynamoDB Tables: %s-transactions, %s-users", 
-		dbClient.Config.TablePrefix, dbClient.Config.TablePrefix)
-
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
-	}
+	log.Printf("DynamoDB Table: %s", tableName)
 }
 
-func setupRoutes(
+func setupFullRoutes(
+	router *mux.Router,
 	transactionHandler *handlers.TransactionHandler,
 	budgetHandler *handlers.BudgetHandler,
 	analyticsHandler *handlers.AnalyticsHandler,
 	aiHandler *handlers.AIHandler,
-) *mux.Router {
-	router := mux.NewRouter()
+) {
 
 	// API version prefix
 	api := router.PathPrefix("/api/v1").Subrouter()
@@ -150,8 +196,6 @@ func setupRoutes(
 
 	// Add logging middleware
 	api.Use(loggingMiddleware)
-
-	return router
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {

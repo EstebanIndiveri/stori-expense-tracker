@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+docs/
+
+# Environment files
+.env*
+!.env.example
+
+# Testing
+tests/
+test-results/
+coverage.html
+coverage.out
+
+# Development
+.air.toml
+tmp/
+.DS_Store
+.vscode/
+.idea/
+
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Build artifacts
+/build/
+/dist/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp_*
+temp/
+.cache/

@@ -89,7 +89,7 @@ func (r *DynamoDBRepository) GetTransactionsByUser(ctx context.Context, userID s
 		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :sk)"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
-			":sk": &types.AttributeValueMemberS{Value: "TRANSACTION#"},
+			":sk": &types.AttributeValueMemberS{Value: "TX#"},
 		},
 		ScanIndexForward: aws.Bool(false), // Most recent first
 		Limit:           aws.Int32(int32(limit)),
@@ -296,7 +296,7 @@ func (r *DynamoDBRepository) GetTransaction(ctx context.Context, userID, transac
 		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :sk_prefix)"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":pk":        &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
-			":sk_prefix": &types.AttributeValueMemberS{Value: "TRANSACTION#"},
+			":sk_prefix": &types.AttributeValueMemberS{Value: "TX#"},
 		},
 	}
 
