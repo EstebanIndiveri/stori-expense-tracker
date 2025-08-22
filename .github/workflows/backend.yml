@@ -125,19 +125,33 @@ jobs:
           flags: backend
           name: backend-coverage
       
-      - name: Build binaries
+      - name: Build Docker image (test)
         run: |
           cd packages/backend
-          # Build API Lambda
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/api cmd/api/main.go
-          # Build AI Advisor Lambda
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/ai-advisor cmd/ai-advisor/main.go
+          # Build and test Docker image locally
+          docker build --platform linux/amd64 -t stori-api:test .
+          docker run --rm -d --name test-container -p 8081:8080 \
+            -e ENVIRONMENT=test \
+            -e DYNAMODB_TABLE_NAME=stori-transactions-test \
+            -e DYNAMODB_ENDPOINT=http://host.docker.internal:8000 \
+            stori-api:test
+          
+          # Wait for container to start
+          sleep 10
+          
+          # Test health endpoint
+          curl -f http://localhost:8081/api/v1/health || exit 1
+          
+          # Cleanup
+          docker stop test-container
       
-      - name: Archive build artifacts
+      - name: Archive Dockerfile and configs
         uses: actions/upload-artifact@v3
         with:
-          name: backend-binaries-${{ github.sha }}
-          path: packages/backend/bin/
+          name: docker-configs-${{ github.sha }}
+          path: |
+            packages/backend/Dockerfile
+            packages/backend/app-runner-config.json
           retention-days: 30
 
   # Security scanning
@@ -174,7 +188,7 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
-  # Deploy to staging
+  # Deploy to staging (App Runner)
   deploy-staging:
     needs: [test-backend, security-scan]
     if: |
@@ -196,28 +210,50 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
       
-      - name: Download build artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: backend-binaries-${{ github.sha }}
-          path: packages/backend/bin/
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
       
-      - name: Deploy to staging
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: stori-api-staging
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           cd packages/backend
-          ./scripts/deploy.sh staging
+          docker build --platform linux/amd64 -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      
+      - name: Update App Runner service
         env:
-          ENVIRONMENT: staging
+          APP_RUNNER_SERVICE_ARN: ${{ vars.STAGING_APP_RUNNER_SERVICE_ARN }}
+        run: |
+          # Start deployment
+          OPERATION_ID=$(aws apprunner start-deployment \
+            --service-arn $APP_RUNNER_SERVICE_ARN \
+            --query 'OperationId' --output text)
+          
+          echo "Started deployment with operation ID: $OPERATION_ID"
+          
+          # Wait for deployment to complete
+          aws apprunner wait service-update-successful \
+            --service-arn $APP_RUNNER_SERVICE_ARN
+          
+          echo "Deployment completed successfully"
       
       - name: Run smoke tests
         run: |
           cd packages/backend
+          # Wait a bit more for service to be ready
+          sleep 30
           go test -v -tags=smoke ./tests/smoke/...
         env:
           API_BASE_URL: ${{ vars.STAGING_API_URL }}
           ENVIRONMENT: staging
 
-  # Deploy to production
+  # Deploy to production (App Runner)
   deploy-production:
     needs: [test-backend, security-scan]
     if: |
@@ -239,26 +275,64 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
       
-      - name: Download build artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: backend-binaries-${{ github.sha }}
-          path: packages/backend/bin/
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
       
-      - name: Deploy to production
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: stori-api
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           cd packages/backend
-          ./scripts/deploy.sh prod
+          docker build --platform linux/amd64 -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:production-corrected
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:production-corrected
+      
+      - name: Update App Runner service
         env:
-          ENVIRONMENT: prod
+          APP_RUNNER_SERVICE_ARN: ${{ vars.PROD_APP_RUNNER_SERVICE_ARN }}
+        run: |
+          # Start deployment
+          OPERATION_ID=$(aws apprunner start-deployment \
+            --service-arn $APP_RUNNER_SERVICE_ARN \
+            --query 'OperationId' --output text)
+          
+          echo "Started deployment with operation ID: $OPERATION_ID"
+          
+          # Wait for deployment to complete (with timeout)
+          timeout 900 aws apprunner wait service-update-successful \
+            --service-arn $APP_RUNNER_SERVICE_ARN || {
+            echo "Deployment timed out after 15 minutes"
+            exit 1
+          }
+          
+          echo "Production deployment completed successfully"
       
       - name: Run production smoke tests
         run: |
           cd packages/backend
+          # Wait for service to be fully ready
+          sleep 60
           go test -v -tags=smoke ./tests/smoke/...
         env:
           API_BASE_URL: ${{ vars.PROD_API_URL }}
           ENVIRONMENT: prod
+      
+      - name: Test AI endpoints
+        run: |
+          echo "Testing AI endpoints..."
+          # Test AI advisor endpoint
+          curl -f "${{ vars.PROD_API_URL }}/api/v1/ai/advisor?user_id=user-123" || exit 1
+          
+          # Test AI advice endpoint
+          curl -f -X POST "${{ vars.PROD_API_URL }}/api/v1/ai/advice" \
+            -H "Content-Type: application/json" \
+            -d '{"user_id": "user-123", "question": "How can I save money?"}' || exit 1
+          
+          echo "AI endpoints are working correctly"
       
       - name: Create GitHub release
         if: github.ref == 'refs/heads/main'
@@ -270,6 +344,10 @@ jobs:
           release_name: Backend Release v${{ github.run_number }}
           body: |
             Backend deployment for commit ${{ github.sha }}
+            
+            🚀 Deployed to: ${{ vars.PROD_API_URL }}
+            🤖 AI Integration: Groq (llama3-8b-8192)
+            🗄️ Database: DynamoDB (stori-transactions-prod)
             
             Changes in this release:
             ${{ github.event.head_commit.message }}
